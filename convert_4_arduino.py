@@ -3,32 +3,31 @@
 import sys
 from PIL import Image
 
-TARGET_W = 128
-TARGET_H = 64
 
-
-def image_to_bits(im, target_w=TARGET_W, target_h=TARGET_H):
+def image_to_bits_native(im):
     width, height = im.size
-    step_x = width / target_w
-    step_y = height / target_h
+
+    if height % 8 != 0:
+        raise ValueError(
+            f"L'altezza dell'immagine ({height}) deve essere multipla di 8"
+        )
 
     pixels = im.load()
-    bits = [0] * (target_w * target_h)
+    bits = [0] * (width * height)
 
-    for y in range(target_h):
-        py = int(y * step_y)
-        for x in range(target_w):
-            px = int(x * step_x)
-            r, g, b = pixels[px, py]
-            bits[y * target_w + x] = 1 if (r + g + b) < 128 * 3 else 0
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            bits[y * width + x] = 1 if (r + g + b) < (128 * 3) else 0
 
-    return bits
+    return bits, width, height
 
 
-def bits_to_sh1106(bits, width=TARGET_W, height=TARGET_H):
+def bits_to_pages(bits, width, height):
     framebuffer = []
 
-    for page in range(height // 8):
+    pages = height // 8
+    for page in range(pages):
         for x in range(width):
             byte = 0
             for bit in range(8):
@@ -40,46 +39,35 @@ def bits_to_sh1106(bits, width=TARGET_W, height=TARGET_H):
     return framebuffer
 
 
-def print_arrays_hex(data, name):
+def print_cpp_array(data, name, width, height):
     print("#include <avr/pgmspace.h>\n")
 
-    # ---------- HEX ----------
-    print(f"// === HEX ===")
-    print(f"const uint8_t {name}_hex[{len(data)}] PROGMEM = {{")
+    print(f"// Risoluzione: {width}x{height}")
+    print(f"// Byte totali: {len(data)}\n")
+
+    print(f"const uint8_t {name}[{len(data)}] PROGMEM = {{")
 
     for i, b in enumerate(data):
-        print(f"0x{b:02X},", end="")
+        print(f" 0x{b:02X},", end="")
         if (i + 1) % 16 == 0:
-            print()
-    print("};\n")
-
-def print_arrays_bin(data, name):
-    print("#include <avr/pgmspace.h>\n")
-
-    # ---------- BIN ----------
-    print(f"// === BIN ===")
-    print(f"const uint8_t {name}_bin[{len(data)}] PROGMEM = {{")
-
-    for i, b in enumerate(data):
-        print(f" 0b{b:08b},", end="")
-        if (i + 1) % 8 == 0:
             print()
     print("};")
 
 
 def main():
     if len(sys.argv) != 2:
-        print("Uso: python3 convert_4_arduino.py image.png", file=sys.stderr)
+        print("Uso: python3 convert_native.py image.png", file=sys.stderr)
         sys.exit(1)
 
     image_path = sys.argv[1]
     var_name = image_path.rsplit(".", 1)[0]
 
     im = Image.open(image_path).convert("RGB")
-    bits = image_to_bits(im)
-    framebuffer = bits_to_sh1106(bits)
 
-    print_arrays_hex(framebuffer, var_name)
+    bits, width, height = image_to_bits_native(im)
+    framebuffer = bits_to_pages(bits, width, height)
+
+    print_cpp_array(framebuffer, var_name, width, height)
 
 
 if __name__ == "__main__":
